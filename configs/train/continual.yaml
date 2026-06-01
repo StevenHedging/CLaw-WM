@@ -1,0 +1,5 @@
+epochs: 1
+lr: 0.001
+max_steps: 30
+log_every: 5
+checkpoint_every: 15

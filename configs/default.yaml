@@ -1,0 +1,50 @@
+seed: 42
+device: auto
+output_dir: outputs
+checkpoint_path: outputs/checkpoints/last.pt
+use_wandb: false
+
+data:
+  image_size: 32
+  channels: 3
+  context_length: 4
+  episode_length: 24
+  num_train_episodes: 24
+  num_eval_episodes: 6
+  batch_size: 8
+  num_workers: 0
+  ball_radius: 2
+  switch_time: 12
+  seed: 123
+
+model:
+  latent_dim: 32
+  encoder_channels: 24
+  head_hidden_dim: 64
+  head_num_layers: 2
+  initial_heads: 1
+  dt: 1.0
+  renderer_hidden_dim: 128
+  select_every_m: 1
+
+continual:
+  reuse_threshold: 0.035
+  max_heads: 4
+  spawn_init_from_best: true
+  force_manager_head_for_update: true
+  replay_capacity: 256
+  replay_batch_size: 8
+  lambda_replay: 0.25
+  lambda_distill: 0.05
+  lambda_l2: 0.0
+
+train:
+  epochs: 1
+  lr: 0.001
+  max_steps: 30
+  log_every: 5
+  checkpoint_every: 15
+
+eval:
+  max_batches: 10
+  rollout_horizon: 8

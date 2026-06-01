@@ -1,0 +1,8 @@
+latent_dim: 32
+encoder_channels: 24
+head_hidden_dim: 64
+head_num_layers: 2
+initial_heads: 1
+dt: 1.0
+renderer_hidden_dim: 128
+select_every_m: 1

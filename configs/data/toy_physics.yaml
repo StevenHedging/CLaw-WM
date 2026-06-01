@@ -1,0 +1,11 @@
+image_size: 32
+channels: 3
+context_length: 4
+episode_length: 24
+num_train_episodes: 24
+num_eval_episodes: 6
+batch_size: 8
+num_workers: 0
+ball_radius: 2
+switch_time: 12
+seed: 123
