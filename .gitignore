@@ -12,6 +12,7 @@ env/
 
 outputs/
 wandb/
+/data/
 
 *.egg-info/
 dist/

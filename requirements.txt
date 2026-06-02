@@ -6,3 +6,6 @@ matplotlib>=3.8
 pytest>=7.0
 tqdm>=4.66
 wandb>=0.16
+h5py>=3.10
+huggingface_hub>=0.23
+imageio[ffmpeg]>=2.34

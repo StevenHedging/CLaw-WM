@@ -1,0 +1,38 @@
+seed: 42
+device: auto
+output_dir: outputs/single_law_phyworld
+checkpoint_path: outputs/single_law_phyworld/last.pt
+
+data:
+  train_path: data/phyworld/id_ood_data/uniform_motion_30K.hdf5
+  eval_path: data/phyworld/id_ood_data/uniform_motion_eval.hdf5
+  context_length: 3
+  image_size: 64
+  state_scale: 16.0
+  max_train_videos: 256
+  max_eval_videos: 128
+  batch_size: 16
+  num_workers: 0
+  cache_size: 96
+
+model:
+  latent_dim: 4
+  encoder_channels: 24
+  head_hidden_dim: 64
+  head_num_layers: 2
+  dt: 1.0
+  renderer_hidden_dim: 64
+
+train:
+  epochs: 1
+  max_steps: 80
+  lr: 0.001
+  image_loss_weight: 1.0
+  foreground_loss_weight: 50.0
+  state_loss_weight: 10.0
+  dynamics_loss_weight: 10.0
+  log_every: 10
+
+eval:
+  max_batches: 20
+  rollout_horizon: 8

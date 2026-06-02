@@ -86,6 +86,37 @@ pip install -r requirements.txt
 python scripts/train_toy.py --config configs/default.yaml
 ```
 
+## Single-Law PhyWorld Sanity Check
+
+在进入 continual / multi-head 之前，可以先验证单一动力学规律下的核心分解：
+
+```text
+C_t -> E_theta -> z_t -> F_phi -> z_{t+1} -> R_psi -> I_{t+1}
+```
+
+本仓库提供了一个最小 PhyWorld uniform-motion 验证。它使用公开数据集 `magicr/phyworld` 中的：
+
+```text
+id_ood_data/uniform_motion_30K.hdf5
+id_ood_data/uniform_motion_eval.hdf5
+```
+
+数据集许可证为 CC-BY-4.0；使用时请引用 PhyWorld / "How Far is Video Generation from World Model? -- A Physical Law Perspective"。
+
+下载最小数据：
+
+```bash
+python scripts/download_phyworld_minimal.py --local-dir data/phyworld
+```
+
+运行单头、单动力学验证：
+
+```bash
+python scripts/train_single_law.py --config configs/single_law_phyworld.yaml
+```
+
+这个实验有意使用 state-supervised latent：`z=[x,y,vx,vy]`，用来快速判断画面 encoder 是否能提取物理状态、唯一 residual dynamics head 是否能推进状态、renderer 是否能生成下一帧。当前 single-law encoder 使用保留空间特征的 `SpatialFlattenRepresentationMapper`；原始全局平均池化 encoder 会抹掉位置信息，不适合这个验证。
+
 训练流程会：
 
 - 初始化 encoder、renderer 和至少一个 dynamics head；
