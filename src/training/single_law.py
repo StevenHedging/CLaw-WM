@@ -9,7 +9,7 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 from omegaconf import OmegaConf
-from torch.utils.data import DataLoader
+from torch.utils.data import ConcatDataset, DataLoader, Dataset
 
 from src.data.phyworld import PhyWorldUniformMotionDataset
 from src.models.dynamics_heads import DynamicsHeadLibrary
@@ -50,19 +50,51 @@ def build_single_law_model(cfg: Any) -> WorldModel:
     return WorldModel(encoder, head_library, renderer, selector)
 
 
+def _as_path_list(value: Any) -> list[str]:
+    """Normalize a config scalar/list path field."""
+
+    if value is None:
+        return []
+    if isinstance(value, (str, Path)):
+        return [str(value)]
+    return [str(item) for item in value]
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    return int(value)
+
+
+def build_phyworld_dataset(cfg: Any, train: bool) -> Dataset:
+    """Build one or more PhyWorld HDF5 datasets for the configured split."""
+
+    split_paths = cfg.data.train_paths if train and "train_paths" in cfg.data else None
+    split_paths = cfg.data.eval_paths if (not train and "eval_paths" in cfg.data) else split_paths
+    if split_paths is None:
+        split_paths = cfg.data.train_path if train else cfg.data.eval_path
+    paths = _as_path_list(split_paths)
+    if not paths:
+        raise ValueError("No PhyWorld HDF5 paths were configured")
+    max_videos = _optional_int(cfg.data.max_train_videos if train else cfg.data.max_eval_videos)
+    datasets = [
+        PhyWorldUniformMotionDataset(
+            hdf5_path=path,
+            context_length=int(cfg.data.context_length),
+            image_size=int(cfg.data.image_size),
+            max_videos=max_videos,
+            state_scale=float(cfg.data.state_scale),
+            cache_size=int(cfg.data.cache_size),
+        )
+        for path in paths
+    ]
+    return datasets[0] if len(datasets) == 1 else ConcatDataset(datasets)
+
+
 def build_phyworld_loader(cfg: Any, train: bool) -> DataLoader:
     """Build a PhyWorld dataloader for the configured split."""
 
-    path = cfg.data.train_path if train else cfg.data.eval_path
-    max_videos = cfg.data.max_train_videos if train else cfg.data.max_eval_videos
-    dataset = PhyWorldUniformMotionDataset(
-        hdf5_path=path,
-        context_length=int(cfg.data.context_length),
-        image_size=int(cfg.data.image_size),
-        max_videos=int(max_videos),
-        state_scale=float(cfg.data.state_scale),
-        cache_size=int(cfg.data.cache_size),
-    )
+    dataset = build_phyworld_dataset(cfg, train=train)
     return DataLoader(
         dataset,
         batch_size=int(cfg.data.batch_size),
@@ -88,20 +120,39 @@ def _foreground_weighted_mse(
     return ((prediction - target).pow(2) * weights).mean()
 
 
-def _losses(model: WorldModel, batch: dict[str, Any], foreground_weight: float = 0.0) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+def _losses(
+    model: WorldModel,
+    batch: dict[str, Any],
+    foreground_weight: float = 0.0,
+    compute_state_metrics: bool = True,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     output = model(batch["context"], target_frame=batch["target"], force_head_id=0)
     image_loss = _foreground_weighted_mse(output["prediction"], batch["target"], foreground_weight)
     image_mse = F.mse_loss(output["prediction"], batch["target"])
-    state_loss = F.mse_loss(output["z_t"], batch["state"])
-    dynamics_loss = F.mse_loss(output["z_next"], batch["next_state"])
-    position_error = torch.linalg.vector_norm(output["z_next"][:, :2] - batch["next_state"][:, :2], dim=-1).mean()
-    return output["prediction"], {
+    losses = {
         "image_loss": image_loss,
         "image_mse": image_mse,
-        "state_loss": state_loss,
-        "dynamics_loss": dynamics_loss,
-        "position_error": position_error,
     }
+    if compute_state_metrics and "state" in batch and "next_state" in batch and output["z_t"].shape[-1] == batch["state"].shape[-1]:
+        state_loss = F.mse_loss(output["z_t"], batch["state"])
+        dynamics_loss = F.mse_loss(output["z_next"], batch["next_state"])
+        position_error = torch.linalg.vector_norm(output["z_next"][:, :2] - batch["next_state"][:, :2], dim=-1).mean()
+        losses.update(
+            {
+                "state_loss": state_loss,
+                "dynamics_loss": dynamics_loss,
+                "position_error": position_error,
+            }
+        )
+    return output["prediction"], losses
+
+
+def _weighted_optional_loss(weight: float, value: torch.Tensor | None) -> torch.Tensor | float:
+    """Return ``weight * value`` only when that term is intentionally enabled."""
+
+    if weight == 0.0 or value is None:
+        return 0.0
+    return weight * value
 
 
 def train_single_law(config_path: str | Path, max_steps: int | None = None) -> dict[str, float]:
@@ -126,11 +177,17 @@ def train_single_law(config_path: str | Path, max_steps: int | None = None) -> d
         for batch in train_loader:
             batch = _move_batch(batch, device)
             optimizer.zero_grad(set_to_none=True)
-            _, losses = _losses(model, batch, foreground_weight=float(cfg.train.foreground_loss_weight))
+            use_auxiliary_state_loss = bool(cfg.train.get("use_auxiliary_state_loss", True))
+            _, losses = _losses(
+                model,
+                batch,
+                foreground_weight=float(cfg.train.foreground_loss_weight),
+                compute_state_metrics=use_auxiliary_state_loss,
+            )
             total_loss = (
                 float(cfg.train.image_loss_weight) * losses["image_loss"]
-                + float(cfg.train.state_loss_weight) * losses["state_loss"]
-                + float(cfg.train.dynamics_loss_weight) * losses["dynamics_loss"]
+                + _weighted_optional_loss(float(cfg.train.state_loss_weight), losses.get("state_loss"))
+                + _weighted_optional_loss(float(cfg.train.dynamics_loss_weight), losses.get("dynamics_loss"))
             )
             total_loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
@@ -168,7 +225,12 @@ def evaluate_single_law(model: WorldModel, loader: DataLoader, cfg: Any, device:
         if batches >= int(cfg.eval.max_batches):
             break
         batch = _move_batch(batch, device)
-        _, losses = _losses(model, batch, foreground_weight=float(cfg.train.foreground_loss_weight))
+        _, losses = _losses(
+            model,
+            batch,
+            foreground_weight=float(cfg.train.foreground_loss_weight),
+            compute_state_metrics=bool(cfg.train.get("report_state_metrics", True)),
+        )
         for key, value in losses.items():
             totals[key] += float(value.detach().cpu())
         batches += 1

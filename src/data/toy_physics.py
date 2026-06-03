@@ -127,7 +127,13 @@ def simulate_episode(
 
 
 class ToyPhysicsDataset(Dataset[dict[str, torch.Tensor | int]]):
-    """Streaming-style dataset of context windows and next-frame targets."""
+    """Streaming-style dataset of context windows and next-frame targets.
+
+    For a context length ``K``, the first supervised prediction is
+    ``[I_0, ..., I_{K-1}] -> I_K``. In one-based frame numbering this is
+    ``[I_1, ..., I_K] -> I_{K+1}``, so no loss is computed before a full
+    velocity-informative context exists.
+    """
 
     def __init__(
         self,
@@ -144,6 +150,8 @@ class ToyPhysicsDataset(Dataset[dict[str, torch.Tensor | int]]):
         if episode_length <= context_length:
             raise ValueError("episode_length must be larger than context_length")
         self.context_length = context_length
+        self.first_target_index = context_length
+        self.first_target_frame_number = context_length + 1
         self.episodes = [
             simulate_episode(
                 episode_id=episode_id,
@@ -181,5 +189,9 @@ class ToyPhysicsDataset(Dataset[dict[str, torch.Tensor | int]]):
             "state": torch.from_numpy(episode.states[time]),
             "episode_id": episode.episode_id,
             "time": time,
+            "context_start": start,
+            "context_end": time,
+            "target_time": time + 1,
+            "target_frame_number": time + 2,
             "dynamics_id": int(episode.dynamics_ids[time]),
         }

@@ -21,6 +21,10 @@ class PhyWorldUniformMotionDataset(Dataset[dict[str, torch.Tensor | int]]):
     Each HDF5 file stores MP4 bytes under ``video_streams`` and ground-truth
     positions under ``position_streams``. The returned state is normalized
     ``[x, y, vx, vy]`` with velocity estimated by finite differences.
+
+    For context length ``K``, the first training target has zero-based index
+    ``K``. Equivalently, the first supervised target is the one-based
+    ``K+1``-th frame.
     """
 
     def __init__(
@@ -59,6 +63,8 @@ class PhyWorldUniformMotionDataset(Dataset[dict[str, torch.Tensor | int]]):
         if num_frames <= self.context_length:
             raise ValueError("context_length must be smaller than the number of frames")
         self.num_frames = num_frames
+        self.first_target_index = self.context_length
+        self.first_target_frame_number = self.context_length + 1
         self._samples = [
             (video_idx, time)
             for video_idx in range(len(self._video_refs))
@@ -138,5 +144,9 @@ class PhyWorldUniformMotionDataset(Dataset[dict[str, torch.Tensor | int]]):
             "next_state": self._state_at(positions, time + 1),
             "episode_id": video_idx,
             "time": time,
+            "context_start": start,
+            "context_end": time,
+            "target_time": time + 1,
+            "target_frame_number": time + 2,
             "dynamics_id": 0,
         }
